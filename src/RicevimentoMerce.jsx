@@ -1,120 +1,137 @@
 import { useState, useRef, useEffect } from "react";
+import { CATALOGO_ADM, PRODOTTO_BY_AAMS } from "./catalogoADM";
 
-const KGC_PER_STECCA = 0.2;
+const KGC_PER_STECCA = 0.200;
 const PACKS_PER_STECCA = 10;
 
+// ── Storage helpers ──────────────────────────────────────────────────────────
+function loadLS(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; }
+  catch { return fallback; }
+}
+function saveLS(key, val) {
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function parseLogistaPDF(text) {
+  const rows = [];
+  // Pattern: riga cod descrizione kgc — handles both "0,600" and "0.600"
+  const re = /^\s*(\d+)\s+(\d+)\s+(.+?)\s+([\d][,.][\d]{3})\s*$/gm;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const kgc = parseFloat(m[4].replace(",", "."));
+    const stecche = Math.round(kgc / KGC_PER_STECCA);
+    const adm = PRODOTTO_BY_AAMS[m[2]];
+    rows.push({
+      riga: parseInt(m[1]),
+      codAams: m[2],
+      descrizione: adm ? adm.nome : m[3].trim(),
+      confezione: adm?.confezione || "astuccio",
+      pezzi: adm?.pezzi || 20,
+      prezzoConf: adm?.prezzoConf || null,
+      kgcPerStecca: adm?.kgcPerStecca || KGC_PER_STECCA,
+      kgc,
+      stecche,
+      pacchi: stecche * PACKS_PER_STECCA,
+      ricevuto: 0,
+      scansioni: [],
+    });
+  }
+  return rows;
+}
+
 const DEMO_ITEMS = [
-  { riga:1, codAams:"630",   descrizione:"DIANA BLU KS*AST20",        kgc:0.6,  stecche:3,  pacchi:30  },
-  { riga:2, codAams:"233",   descrizione:"DIANA ROSSA KS*AST20",       kgc:0.6,  stecche:3,  pacchi:30  },
-  { riga:3, codAams:"1313",  descrizione:"L&M RED LABEL KS*AST20",     kgc:2.0,  stecche:10, pacchi:100 },
-  { riga:4, codAams:"9",     descrizione:"MARLBORO GOLD KS*AST20",     kgc:2.0,  stecche:10, pacchi:100 },
-  { riga:5, codAams:"395",   descrizione:"MARLBORO KS*AST20",          kgc:2.0,  stecche:10, pacchi:100 },
-  { riga:6, codAams:"3840",  descrizione:"WEST ORIGINAL 100S*AST20",   kgc:2.0,  stecche:10, pacchi:100 },
-  { riga:7, codAams:"21232", descrizione:"DELIA CLASSIC GREEN*20PZ",   kgc:2.0,  stecche:10, pacchi:100 },
-  { riga:8, codAams:"21109", descrizione:"DELIA CLASSIC RED*20PZ",     kgc:2.0,  stecche:10, pacchi:100 },
+  { riga:1, codAams:"630",   descrizione:"DIANA BLU KS",        confezione:"astuccio", pezzi:20, prezzoConf:5.20, kgcPerStecca:0.200, kgc:0.6,  stecche:3,  pacchi:30,  ricevuto:0, scansioni:[] },
+  { riga:2, codAams:"233",   descrizione:"DIANA ROSSA KS",       confezione:"astuccio", pezzi:20, prezzoConf:5.20, kgcPerStecca:0.200, kgc:0.6,  stecche:3,  pacchi:30,  ricevuto:0, scansioni:[] },
+  { riga:3, codAams:"1313",  descrizione:"L&M RED LABEL KS",     confezione:"astuccio", pezzi:20, prezzoConf:5.30, kgcPerStecca:0.200, kgc:2.0,  stecche:10, pacchi:100, ricevuto:0, scansioni:[] },
+  { riga:4, codAams:"9",     descrizione:"MARLBORO GOLD KS",     confezione:"astuccio", pezzi:20, prezzoConf:5.40, kgcPerStecca:0.200, kgc:2.0,  stecche:10, pacchi:100, ricevuto:0, scansioni:[] },
+  { riga:5, codAams:"395",   descrizione:"MARLBORO KS",          confezione:"astuccio", pezzi:20, prezzoConf:5.50, kgcPerStecca:0.200, kgc:2.0,  stecche:10, pacchi:100, ricevuto:0, scansioni:[] },
+  { riga:6, codAams:"3840",  descrizione:"WEST ORIGINAL 100S",   confezione:"astuccio", pezzi:20, prezzoConf:5.20, kgcPerStecca:0.200, kgc:2.0,  stecche:10, pacchi:100, ricevuto:0, scansioni:[] },
+  { riga:7, codAams:"21232", descrizione:"DELIA CLASSIC GREEN",  confezione:"astuccio", pezzi:20, prezzoConf:5.00, kgcPerStecca:0.200, kgc:2.0,  stecche:10, pacchi:100, ricevuto:0, scansioni:[] },
+  { riga:8, codAams:"21109", descrizione:"DELIA CLASSIC RED",    confezione:"astuccio", pezzi:20, prezzoConf:5.00, kgcPerStecca:0.200, kgc:2.0,  stecche:10, pacchi:100, ricevuto:0, scansioni:[] },
 ];
 
-function initItems(base) {
-  return base.map(i => ({ ...i, kgcPerStecca: KGC_PER_STECCA, ricevuto: 0, scansioni: [] }));
-}
-
 function StatusBadge({ item }) {
-  const s = styles.badge;
-  if (item.ricevuto === 0) return <span style={s.pending}>In attesa</span>;
-  if (item.ricevuto === item.stecche) return <span style={s.ok}>✓ OK</span>;
-  if (item.ricevuto > item.stecche) return <span style={s.over}>+{item.ricevuto - item.stecche} eccesso</span>;
-  return <span style={s.partial}>{item.ricevuto}/{item.stecche}</span>;
+  if (item.ricevuto === 0) return <span style={st.badge.pending}>In attesa</span>;
+  if (item.ricevuto === item.stecche) return <span style={st.badge.ok}>✓ OK</span>;
+  if (item.ricevuto > item.stecche) return <span style={st.badge.over}>+{item.ricevuto - item.stecche} eccesso</span>;
+  return <span style={st.badge.partial}>{item.ricevuto}/{item.stecche}</span>;
 }
 
-// ── Modal abbinamento barcode ─────────────────────────────────────────────────
-function AbbinamentoModal({ ean, items, onConfirm, onSkip }) {
-  const [selected, setSelected] = useState(null);
-  const [search, setSearch] = useState("");
-
-  const filtered = items.filter(i =>
-    !search || i.descrizione.toLowerCase().includes(search.toLowerCase()) || i.codAams.includes(search)
-  );
+// ── Modal abbinamento ────────────────────────────────────────────────────────
+function ModalAbbinamento({ ean, items, onConfirm, onSkip }) {
+  const [sel, setSel] = useState(null);
+  const [q, setQ] = useState("");
+  const filtered = items.filter(i => !q || i.descrizione.toLowerCase().includes(q.toLowerCase()) || i.codAams.includes(q));
 
   return (
-    <div style={styles.modalOverlay}>
-      <div style={styles.modal}>
-        <div style={styles.modalHeader}>
+    <div style={st.overlay}>
+      <div style={st.modal}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
           <div>
-            <p style={styles.modalTitle}>Nuovo barcode rilevato</p>
-            <p style={styles.modalSub}>Prima scansione — abbina questo codice al prodotto in fattura</p>
+            <p style={{ fontSize:15, fontWeight:700, color:C.text, marginBottom:3 }}>Nuovo barcode rilevato</p>
+            <p style={{ fontSize:12, color:C.muted }}>Prima scansione — abbina a un prodotto in fattura</p>
           </div>
-          <div style={styles.eanBadge}>{ean}</div>
+          <code style={st.eanBadge}>{ean}</code>
         </div>
-
-        <p style={styles.modalLabel}>A quale prodotto corrisponde questa stecca?</p>
-        <input
-          style={styles.modalSearch}
-          placeholder="Cerca per nome o codice AAMS..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          autoFocus
-        />
-
-        <div style={styles.modalList}>
-          {filtered.map((item, i) => (
-            <div
-              key={i}
-              style={{ ...styles.modalItem, ...(selected === item.codAams ? styles.modalItemSel : {}) }}
-              onClick={() => setSelected(item.codAams)}
-            >
-              <div style={styles.modalItemLeft}>
-                <code style={styles.modalCode}>{item.codAams}</code>
-                <span style={styles.modalItemName}>{item.descrizione}</span>
+        <input style={st.modalSearch} placeholder="Cerca prodotto..." value={q} onChange={e=>setQ(e.target.value)} autoFocus />
+        <div style={{ maxHeight:260, overflowY:"auto", display:"flex", flexDirection:"column", gap:4, marginBottom:14 }}>
+          {filtered.map((item,i) => (
+            <div key={i} style={{ ...st.modalItem, ...(sel===item.codAams ? st.modalItemSel : {}) }} onClick={()=>setSel(item.codAams)}>
+              <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+                <code style={st.smallCode}>{item.codAams}</code>
+                <span style={{ fontSize:13, fontWeight:500 }}>{item.descrizione}</span>
+                {item.prezzoConf && <span style={{ fontSize:11, color:C.muted }}>€ {item.prezzoConf.toFixed(2)} / conf.</span>}
               </div>
-              <div style={styles.modalItemRight}>
-                <span style={styles.modalItemQty}>{item.stecche} stecche</span>
-                {selected === item.codAams && <span style={styles.checkmark}>✓</span>}
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <span style={{ fontSize:12, color:C.muted }}>{item.stecche} stecche</span>
+                {sel===item.codAams && <span style={{ color:C.green, fontWeight:700 }}>✓</span>}
               </div>
             </div>
           ))}
         </div>
-
-        <div style={styles.modalFooter}>
-          <button style={styles.modalSkip} onClick={onSkip}>Salta</button>
-          <button
-            style={{ ...styles.modalConfirm, ...(selected ? {} : styles.modalConfirmDisabled) }}
-            disabled={!selected}
-            onClick={() => selected && onConfirm(ean, selected)}
-          >
+        <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+          <button style={st.btnSecondary} onClick={onSkip}>Salta</button>
+          <button style={{ ...st.btnPrimary, ...(sel?{}:{background:"#CCC", cursor:"not-allowed"}) }} disabled={!sel} onClick={()=>sel&&onConfirm(ean,sel)}>
             Abbina e registra stecca
           </button>
         </div>
-
-        <p style={styles.modalHint}>
-          💾 Questo abbinamento verrà salvato — dalla prossima consegna questa stecca verrà riconosciuta automaticamente.
+        <p style={{ fontSize:11, color:C.muted, textAlign:"center", marginTop:12 }}>
+          💾 Abbinamento salvato permanentemente
         </p>
       </div>
     </div>
   );
 }
 
-// ── App principale ────────────────────────────────────────────────────────────
-export default function RicevimentoMerce() {
+// ── Main ─────────────────────────────────────────────────────────────────────
+export default function RicevimentoMerce({ onOpenStorico }) {
   const [phase, setPhase] = useState("upload");
   const [items, setItems] = useState([]);
-  const [ordineInfo, setOrdineInfo] = useState(null);
+  const [sessione, setSessione] = useState(null); // { numero, data, fornitore }
   const [activeIdx, setActiveIdx] = useState(null);
   const [scanInput, setScanInput] = useState("");
-  const [manualQty, setManualQty] = useState(1);
+  const [manualQty, setManualQty] = useState("");
   const [toast, setToast] = useState(null);
   const [dragOver, setDragOver] = useState(false);
-
-  // Catalogo barcode: { [ean]: codAams } — persiste in localStorage
-  const [catalogo, setCatalogo] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("catalogo_barcode") || "{}"); }
-    catch { return {}; }
-  });
-
-  // Modal abbinamento
   const [pendingEan, setPendingEan] = useState(null);
+  const [catalogo, setCatalogo] = useState(() => loadLS("catalogo_barcode", {}));
+  const [sessActivaAlert, setSessioneActivaAlert] = useState(false);
 
   const scanRef = useRef(null);
   const fileRef = useRef(null);
+
+  // Check sessione attiva al mount
+  useEffect(() => {
+    const saved = loadLS("sessione_attiva", null);
+    if (saved) {
+      setItems(saved.items);
+      setSessione(saved.info);
+      setPhase("check");
+      setActiveIdx(saved.activeIdx || 0);
+    }
+  }, []);
 
   useEffect(() => {
     if (phase === "check" && activeIdx !== null) {
@@ -122,21 +139,30 @@ export default function RicevimentoMerce() {
     }
   }, [phase, activeIdx]);
 
-  function showToast(msg, type = "ok") {
+  // Salva sessione attiva ad ogni cambio
+  useEffect(() => {
+    if (phase === "check" && sessione) {
+      saveLS("sessione_attiva", { items, info: sessione, activeIdx });
+    }
+  }, [items, phase, sessione, activeIdx]);
+
+  function showToast(msg, type="ok") {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2800);
   }
 
-  function saveCatalogo(newCat) {
-    setCatalogo(newCat);
-    try { localStorage.setItem("catalogo_barcode", JSON.stringify(newCat)); } catch {}
+  function saveCatalogo(c) { setCatalogo(c); saveLS("catalogo_barcode", c); }
+
+  function avviaSessione(parsedItems, info) {
+    setItems(parsedItems);
+    setSessione(info);
+    setPhase("check");
+    setActiveIdx(0);
   }
 
   function loadDemo() {
-    setItems(initItems(DEMO_ITEMS));
-    setOrdineInfo({ numero: "377902938", data: "29.05.2026", fornitore: "Logista", rivendita: "0017" });
-    setPhase("check");
-    setActiveIdx(0);
+    avviaSessione(DEMO_ITEMS.map(i=>({...i, ricevuto:0, scansioni:[]})),
+      { numero:"377902938", data:"29.05.2026", fornitore:"Logista", rivendita:"0017" });
   }
 
   function handleFile(file) {
@@ -144,28 +170,17 @@ export default function RicevimentoMerce() {
     const reader = new FileReader();
     reader.onload = e => {
       const text = e.target.result;
-      const rowRegex = /^\s*(\d+)\s+(\d+)\s+(.+?)\s+([\d,]+)\s*$/gm;
-      const parsed = [];
-      let m;
-      while ((m = rowRegex.exec(text)) !== null) {
-        const kgc = parseFloat(m[4].replace(",", "."));
-        parsed.push({
-          riga: parseInt(m[1]), codAams: m[2], descrizione: m[3].trim(),
-          kgc, stecche: Math.round(kgc / KGC_PER_STECCA),
-          pacchi: Math.round(kgc / KGC_PER_STECCA) * PACKS_PER_STECCA,
-        });
-      }
+      const parsed = parseLogistaPDF(text);
       if (parsed.length > 0) {
-        setItems(initItems(parsed));
-        setOrdineInfo({ numero: "—", data: "—", fornitore: "Logista", rivendita: "—" });
+        // Extract order info from text
+        const numOrdine = (text.match(/[Nn]umero\s+ordine\s+(\d+)/)||[])[1] || "—";
+        const dataConsegna = (text.match(/[Dd]ata\s+[Cc]onsegna\s+([\d.]+)/)||[])[1] || "—";
+        avviaSessione(parsed, { numero: numOrdine, data: dataConsegna, fornitore:"Logista", rivendita:"—" });
       } else {
-        setItems(initItems(DEMO_ITEMS));
-        setOrdineInfo({ numero: "377902938", data: "29.05.2026", fornitore: "Logista", rivendita: "0017" });
+        showToast("Nessun prodotto trovato nel file — prova con l'esempio", "warn");
       }
-      setPhase("check");
-      setActiveIdx(0);
     };
-    reader.onerror = loadDemo;
+    reader.onerror = () => showToast("Errore lettura file", "warn");
     reader.readAsText(file);
   }
 
@@ -174,276 +189,238 @@ export default function RicevimentoMerce() {
     handleFile(e.dataTransfer.files[0]);
   }
 
-  // ── Gestione scansione ────────────────────────────────────────────────────
+  // ── Scansione ──────────────────────────────────────────────────────────────
   function handleScan(e) {
     if (e.key !== "Enter" || !scanInput.trim()) return;
     const ean = scanInput.trim();
     setScanInput("");
 
-    // 1. Già nel catalogo?
     if (catalogo[ean]) {
       const idx = items.findIndex(i => i.codAams === catalogo[ean]);
-      if (idx !== -1) {
-        registraRicezione(idx, 1, ean);
-        setActiveIdx(idx);
-        return;
-      }
+      if (idx !== -1) { registra(idx, 1, ean); setActiveIdx(idx); return; }
     }
-
-    // 2. EAN corrisponde direttamente al codAams?
     const directIdx = items.findIndex(i => i.codAams === ean);
-    if (directIdx !== -1) {
-      registraRicezione(directIdx, 1, ean);
-      setActiveIdx(directIdx);
-      return;
-    }
-
-    // 3. Sconosciuto → apri modal abbinamento
+    if (directIdx !== -1) { registra(directIdx, 1, ean); setActiveIdx(directIdx); return; }
     setPendingEan(ean);
   }
 
   function onAbbina(ean, codAams) {
-    const newCat = { ...catalogo, [ean]: codAams };
-    saveCatalogo(newCat);
+    const nc = { ...catalogo, [ean]: codAams };
+    saveCatalogo(nc);
     setPendingEan(null);
     const idx = items.findIndex(i => i.codAams === codAams);
-    if (idx !== -1) {
-      registraRicezione(idx, 1, ean);
-      setActiveIdx(idx);
-      showToast(`✓ Abbinamento salvato: ${items[idx].descrizione}`, "ok");
-    }
+    if (idx !== -1) { registra(idx, 1, ean); setActiveIdx(idx); }
+    showToast(`✓ Abbinato: ${items.find(i=>i.codAams===codAams)?.descrizione}`, "ok");
     setTimeout(() => scanRef.current?.focus(), 100);
   }
 
-  function onSkipAbbinamento() {
-    setPendingEan(null);
-    showToast("Scansione ignorata", "info");
-    setTimeout(() => scanRef.current?.focus(), 100);
-  }
-
-  function registraRicezione(idx, qty, barcode = "manuale") {
+  function registra(idx, qty, barcode="manuale") {
     setItems(prev => prev.map((item, i) => {
       if (i !== idx) return item;
-      const newRic = item.ricevuto + qty;
-      const newScansioni = [...item.scansioni, { qty, barcode, ts: new Date().toLocaleTimeString("it-IT") }];
-      if (newRic === item.stecche) showToast(`✓ ${item.descrizione} — completato!`, "ok");
-      else if (newRic > item.stecche) showToast(`⚠ ${item.descrizione} — eccesso +${newRic - item.stecche}`, "warn");
-      else showToast(`${item.descrizione}: ${newRic}/${item.stecche}`, "info");
-      return { ...item, ricevuto: newRic, scansioni: newScansioni };
+      const n = item.ricevuto + qty;
+      const sc = [...item.scansioni, { qty, barcode, ts: new Date().toLocaleTimeString("it-IT") }];
+      if (n === item.stecche) showToast(`✓ ${item.descrizione} — completato!`);
+      else if (n > item.stecche) showToast(`⚠ ${item.descrizione} — eccesso +${n-item.stecche}`, "warn");
+      else showToast(`${item.descrizione}: ${n}/${item.stecche}`, "info");
+      return { ...item, ricevuto: n, scansioni: sc };
     }));
   }
 
-  function resetItem(idx) {
-    setItems(prev => prev.map((item, i) => i === idx ? { ...item, ricevuto: 0, scansioni: [] } : item));
+  function rimuovi(idx, qty=1) {
+    setItems(prev => prev.map((item,i) => {
+      if (i !== idx) return item;
+      const n = item.ricevuto - qty;
+      const sc = [...item.scansioni, { qty: -qty, barcode:"rimosso", ts: new Date().toLocaleTimeString("it-IT") }];
+      showToast(`${item.descrizione}: rimossa 1 stecca (${n}/${item.stecche})`, "info");
+      return { ...item, ricevuto: n, scansioni: sc };
+    }));
   }
 
-  const totaleAtteso = items.reduce((a, i) => a + i.stecche, 0);
-  const totaleRicevuto = items.reduce((a, i) => a + i.ricevuto, 0);
-  const completati = items.filter(i => i.ricevuto === i.stecche).length;
-  const discrepanze = items.filter(i => i.ricevuto > 0 && i.ricevuto !== i.stecche).length;
-  const progresso = totaleAtteso > 0 ? Math.min(100, Math.round(totaleRicevuto / totaleAtteso * 100)) : 0;
-  const catalogoCount = Object.keys(catalogo).length;
+  function aggiungiManuale() {
+    const q = parseInt(manualQty);
+    if (!q || isNaN(q) || activeIdx === null) return;
+    if (q < 0) rimuovi(activeIdx, Math.abs(q));
+    else registra(activeIdx, q);
+    setManualQty("");
+  }
 
-  // ── UPLOAD ────────────────────────────────────────────────────────────────
+  function chiudiSessione() {
+    // Salva nello storico
+    const storico = loadLS("storico_ordini", []);
+    const nuovoOrdine = {
+      id: Date.now(),
+      ...sessione,
+      chiusoIl: new Date().toLocaleString("it-IT"),
+      items: items.map(i => ({ ...i })),
+      totaleAtteso: items.reduce((a,i)=>a+i.stecche,0),
+      totaleRicevuto: items.reduce((a,i)=>a+i.ricevuto,0),
+      discrepanze: items.filter(i=>i.ricevuto>0&&i.ricevuto!==i.stecche).length,
+    };
+    saveLS("storico_ordini", [nuovoOrdine, ...storico]);
+    saveLS("sessione_attiva", null);
+    setPhase("upload");
+    setItems([]);
+    setSessione(null);
+    setActiveIdx(null);
+    showToast("✓ Sessione chiusa e salvata nello storico");
+  }
+
+  function annullaSessione() {
+    saveLS("sessione_attiva", null);
+    setPhase("upload");
+    setItems([]);
+    setSessione(null);
+    setActiveIdx(null);
+  }
+
+  const totAtt = items.reduce((a,i)=>a+i.stecche,0);
+  const totRic = items.reduce((a,i)=>a+i.ricevuto,0);
+  const completati = items.filter(i=>i.ricevuto===i.stecche).length;
+  const discrepanze = items.filter(i=>i.ricevuto>0&&i.ricevuto!==i.stecche).length;
+  const progresso = totAtt>0 ? Math.min(100, Math.round(totRic/totAtt*100)) : 0;
+  const catCount = Object.keys(catalogo).length;
+  const activeItem = activeIdx !== null ? items[activeIdx] : null;
+
+  // ── UPLOAD ─────────────────────────────────────────────────────────────────
   if (phase === "upload") return (
-    <div style={styles.root}>
-      <div style={styles.uploadWrap}>
-        <div style={styles.logo}>
-          <span style={styles.logoL}>L</span>
-          <span style={styles.logoText}>ogista · Ricevimento Merce</span>
+    <div style={st.root}>
+      <div style={st.uploadWrap}>
+        <div style={st.logo}>
+          <span style={st.logoL}>L</span>
+          <span style={{ fontSize:16, fontWeight:600, color:C.text }}>ogista · Ricevimento Merce</span>
         </div>
-        <p style={styles.uploadSub}>Carica il PDF dell'ordine Logista per iniziare il controllo</p>
+        <p style={{ fontSize:13, color:C.muted, marginBottom:28 }}>Carica il PDF dell'ordine Logista per iniziare</p>
 
-        <div
-          style={{ ...styles.dropzone, ...(dragOver ? styles.dropzoneActive : {}) }}
-          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
+        <div style={{ ...st.dropzone, ...(dragOver?st.dropzoneActive:{}) }}
+          onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+          onDragLeave={()=>setDragOver(false)}
           onDrop={handleDrop}
-          onClick={() => fileRef.current?.click()}
-        >
-          <input ref={fileRef} type="file" accept=".pdf,.txt" style={{ display:"none" }}
-            onChange={e => handleFile(e.target.files[0])} />
-          <div style={styles.dropIcon}>📄</div>
-          <p style={styles.dropMain}>Trascina il PDF Logista qui</p>
-          <p style={styles.dropSub}>oppure clicca per selezionare il file</p>
+          onClick={()=>fileRef.current?.click()}>
+          <input ref={fileRef} type="file" accept=".pdf,.txt" style={{display:"none"}} onChange={e=>handleFile(e.target.files[0])} />
+          <div style={{ fontSize:36, marginBottom:10 }}>📄</div>
+          <p style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>Trascina il PDF Logista qui</p>
+          <p style={{ fontSize:12, color:C.muted }}>oppure clicca per selezionare</p>
         </div>
 
-        <div style={styles.divider}><span style={{ background:"#F7F5F0", padding:"0 10px" }}>oppure</span></div>
+        <div style={{ textAlign:"center", color:"#CCC", fontSize:12, margin:"20px 0", borderTop:`1px solid ${C.border}`, paddingTop:12 }}>oppure</div>
 
-        <button style={styles.demoBtn} onClick={loadDemo}>
+        <button style={{ ...st.btnPrimary, width:"100%" }} onClick={loadDemo}>
           Carica ordine di esempio (377902938 · 29.05.2026)
         </button>
 
-        {catalogoCount > 0 && (
-          <div style={styles.catalogoBanner}>
-            <span>📦 Catalogo barcode: <strong>{catalogoCount} prodotti</strong> già abbinati</span>
-            <button style={styles.catalogoClear} onClick={() => { saveCatalogo({}); showToast("Catalogo azzerato", "warn"); }}>
-              Azzera
-            </button>
+        {catCount > 0 && (
+          <div style={st.catalogoBanner}>
+            <span>📦 {catCount} barcode nel catalogo</span>
+            <button style={{ background:"none", border:"none", color:C.red, fontSize:11, cursor:"pointer", fontFamily:C.font }} onClick={()=>{saveCatalogo({});showToast("Catalogo azzerato","warn");}}>Azzera</button>
           </div>
         )}
-
-        <p style={styles.hint}>
-          Compatibile con PDF Logista standard.<br />
-          I barcode abbinati vengono salvati automaticamente per le consegne future.
+        <p style={{ fontSize:11, color:"#AAA", textAlign:"center", marginTop:16, lineHeight:1.6 }}>
+          Lettura automatica codici AAMS · {CATALOGO_ADM.length} prodotti nel catalogo ADM
         </p>
       </div>
-      {toast && <div style={{ ...styles.toast, ...(toast.type==="warn"?styles.toastWarn:toast.type==="info"?styles.toastInfo:{}) }}>{toast.msg}</div>}
+      {toast && <Toast toast={toast} />}
     </div>
   );
 
-  // ── SUMMARY ───────────────────────────────────────────────────────────────
+  // ── SUMMARY ────────────────────────────────────────────────────────────────
   if (phase === "summary") return (
-    <div style={styles.root}>
-      <div style={styles.summaryWrap}>
-        <div style={styles.summaryHeader}>
+    <div style={st.root}>
+      <div style={st.summaryWrap}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:20, flexWrap:"wrap", gap:10 }}>
           <div>
-            <p style={styles.summaryTitle}>Riepilogo ricevimento</p>
-            <p style={styles.summarySub}>Ordine {ordineInfo?.numero} · {ordineInfo?.data}</p>
+            <p style={{ fontSize:18, fontWeight:700, color:C.text }}>Riepilogo ricevimento</p>
+            <p style={{ fontSize:12, color:C.muted, marginTop:3 }}>Ordine {sessione?.numero} · {sessione?.data}</p>
           </div>
-          <button style={styles.backBtn} onClick={() => setPhase("check")}>← Torna al controllo</button>
+          <button style={st.btnSecondary} onClick={()=>setPhase("check")}>← Torna al controllo</button>
         </div>
 
-        <div style={styles.summaryGrid}>
-          {[
-            ["Stecche attese", totaleAtteso, null],
-            ["Stecche ricevute", totaleRicevuto, totaleRicevuto===totaleAtteso?"#1a6b2e":"#8B3A0F"],
-            ["Prodotti OK", `${completati}/${items.length}`, "#1a6b2e"],
-            ["Discrepanze", discrepanze, discrepanze>0?"#8B3A0F":"#1a6b2e"],
-          ].map(([label, val, color]) => (
-            <div key={label} style={styles.summaryCard}>
-              <p style={styles.scLabel}>{label}</p>
-              <p style={{ ...styles.scVal, ...(color ? { color } : {}) }}>{val}</p>
-            </div>
+        <div style={st.summaryGrid}>
+          {[["Stecche attese",totAtt,null],["Stecche ricevute",totRic,totRic===totAtt?C.green:C.red],
+            ["Prodotti OK",`${completati}/${items.length}`,C.green],["Discrepanze",discrepanze,discrepanze>0?C.red:C.green]
+          ].map(([l,v,c])=>(
+            <div key={l} style={st.summaryCard}><p style={{fontSize:11,color:C.muted,marginBottom:4}}>{l}</p><p style={{fontSize:22,fontWeight:700,...(c?{color:c}:{})}}>{v}</p></div>
           ))}
         </div>
 
-        <table style={styles.table}>
-          <thead>
-            <tr>{["Cod.AAMS","Prodotto","Attese","Ricevute","Diff","Stato"].map(h =>
-              <th key={h} style={styles.th}>{h}</th>
-            )}</tr>
-          </thead>
+        <table style={st.table}>
+          <thead><tr>{["Cod.AAMS","Prodotto","Prezzo","Attese","Ricevute","Diff","Stato"].map(h=><th key={h} style={st.th}>{h}</th>)}</tr></thead>
           <tbody>
-            {items.map((item, i) => {
+            {items.map((item,i)=>{
               const diff = item.ricevuto - item.stecche;
-              const hasEan = Object.entries(catalogo).find(([,c]) => c === item.codAams);
               return (
-                <tr key={i} style={item.ricevuto!==item.stecche && item.ricevuto>0 ? styles.trWarn : {}}>
-                  <td style={styles.td}>
-                    <code style={styles.code}>{item.codAams}</code>
-                    {hasEan && <span style={styles.eanTag} title={`EAN: ${hasEan[0]}`}>📶</span>}
-                  </td>
-                  <td style={styles.td}>{item.descrizione}</td>
-                  <td style={{...styles.td,textAlign:"center"}}>{item.stecche}</td>
-                  <td style={{...styles.td,textAlign:"center"}}>{item.ricevuto}</td>
-                  <td style={{...styles.td,textAlign:"center",fontWeight:600,color:diff===0?"#aaa":diff>0?"#1a6b2e":"#8B3A0F"}}>
-                    {diff===0?"—":diff>0?`+${diff}`:diff}
-                  </td>
-                  <td style={styles.td}><StatusBadge item={item} /></td>
+                <tr key={i} style={item.ricevuto!==item.stecche&&item.ricevuto>0?{background:"#FFFBF0"}:{}}>
+                  <td style={st.td}><code style={st.smallCode}>{item.codAams}</code></td>
+                  <td style={st.td}>{item.descrizione}</td>
+                  <td style={st.td}>{item.prezzoConf ? `€ ${item.prezzoConf.toFixed(2)}` : "—"}</td>
+                  <td style={{...st.td,textAlign:"center"}}>{item.stecche}</td>
+                  <td style={{...st.td,textAlign:"center"}}>{item.ricevuto}</td>
+                  <td style={{...st.td,textAlign:"center",fontWeight:600,color:diff===0?"#aaa":diff>0?C.green:C.red}}>{diff===0?"—":diff>0?`+${diff}`:diff}</td>
+                  <td style={st.td}><StatusBadge item={item} /></td>
                 </tr>
               );
             })}
           </tbody>
         </table>
 
-        {catalogoCount > 0 && (
-          <div style={styles.catalogoSummary}>
-            <p style={styles.catalogoSummaryTitle}>📦 Catalogo barcode aggiornato</p>
-            <div style={styles.catalogoGrid}>
-              {Object.entries(catalogo).map(([ean, codAams]) => {
-                const prod = items.find(i => i.codAams === codAams);
-                return (
-                  <div key={ean} style={styles.catalogoRow}>
-                    <code style={styles.catalogoEan}>{ean}</code>
-                    <span style={styles.catalogoArrow}>→</span>
-                    <span style={styles.catalogoProd}>{prod?.descrizione || codAams}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <div style={styles.summaryActions}>
-          <button style={styles.primaryBtn} onClick={() => { setItems(initItems(DEMO_ITEMS)); setPhase("upload"); }}>
-            Nuovo ricevimento
-          </button>
-          <button style={styles.secondaryBtn} onClick={() => {
-            const lines = [
-              `Riepilogo ricevimento · Ordine ${ordineInfo?.numero} · ${ordineInfo?.data}`, "",
-              "Cod.AAMS\tProdotto\tAttese\tRicevute\tDiff",
-              ...items.map(i => `${i.codAams}\t${i.descrizione}\t${i.stecche}\t${i.ricevuto}\t${i.ricevuto-i.stecche}`)
+        <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+          <button style={st.btnPrimary} onClick={chiudiSessione}>✓ Chiudi e salva sessione</button>
+          <button style={st.btnSecondary} onClick={()=>{
+            const lines = [`Riepilogo · Ordine ${sessione?.numero} · ${sessione?.data}`,"",
+              "Cod.AAMS\tProdotto\tPrezzo\tAttese\tRicevute\tDiff",
+              ...items.map(i=>`${i.codAams}\t${i.descrizione}\t${i.prezzoConf?`€${i.prezzoConf.toFixed(2)}`:""}\t${i.stecche}\t${i.ricevuto}\t${i.ricevuto-i.stecche}`)
             ].join("\n");
-            navigator.clipboard.writeText(lines).then(() => showToast("Riepilogo copiato"));
-          }}>
-            Copia riepilogo
-          </button>
+            navigator.clipboard.writeText(lines).then(()=>showToast("Riepilogo copiato"));
+          }}>Copia riepilogo</button>
+          <button style={{ ...st.btnSecondary, color:C.red, borderColor:"#F09595" }} onClick={annullaSessione}>Annulla sessione</button>
         </div>
       </div>
-      {toast && <div style={{ ...styles.toast, ...(toast.type==="warn"?styles.toastWarn:toast.type==="info"?styles.toastInfo:{}) }}>{toast.msg}</div>}
+      {toast && <Toast toast={toast} />}
     </div>
   );
 
-  // ── CHECK ─────────────────────────────────────────────────────────────────
-  const activeItem = activeIdx !== null ? items[activeIdx] : null;
-
+  // ── CHECK ──────────────────────────────────────────────────────────────────
   return (
-    <div style={styles.root}>
-      {/* Modal abbinamento */}
-      {pendingEan && (
-        <AbbinamentoModal
-          ean={pendingEan}
-          items={items}
-          onConfirm={onAbbina}
-          onSkip={onSkipAbbinamento}
-        />
-      )}
+    <div style={st.root}>
+      {pendingEan && <ModalAbbinamento ean={pendingEan} items={items} onConfirm={onAbbina} onSkip={()=>{setPendingEan(null);showToast("Scansione ignorata","info");setTimeout(()=>scanRef.current?.focus(),100);}} />}
 
       {/* Header */}
-      <div style={styles.header}>
+      <div style={st.header}>
         <div>
-          <span style={styles.headerTitle}>Ricevimento · Ordine {ordineInfo?.numero}</span>
-          <span style={styles.headerSub}> · {ordineInfo?.data} · Logista</span>
+          <span style={{ fontSize:14, fontWeight:600, color:"#fff" }}>Ordine {sessione?.numero}</span>
+          <span style={{ fontSize:12, color:"#AAA" }}> · {sessione?.data} · Logista</span>
         </div>
         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-          {catalogoCount > 0 && (
-            <span style={styles.headerCatalogo}>📦 {catalogoCount} barcode salvati</span>
-          )}
-          <button style={styles.summaryBtn} onClick={() => setPhase("summary")}>Riepilogo →</button>
+          {catCount>0 && <span style={{ fontSize:11, color:"#AAA", background:"rgba(255,255,255,0.1)", padding:"3px 10px", borderRadius:20 }}>📦 {catCount}</span>}
+          <button style={st.headerBtn} onClick={()=>setPhase("summary")}>Riepilogo →</button>
+          <button style={{ ...st.headerBtn, color:"#F09595", borderColor:"#F09595" }} onClick={annullaSessione}>✕</button>
         </div>
       </div>
 
       {/* Progress */}
-      <div style={styles.progressWrap}>
-        <div style={styles.progressTrack}>
-          <div style={{ ...styles.progressFill, width:`${progresso}%` }} />
-        </div>
-        <span style={styles.progressLabel}>{totaleRicevuto}/{totaleAtteso} stecche · {completati}/{items.length} prodotti</span>
+      <div style={st.progressWrap}>
+        <div style={st.progressTrack}><div style={{ ...st.progressFill, width:`${progresso}%` }} /></div>
+        <span style={{ fontSize:12, color:C.muted, whiteSpace:"nowrap" }}>{totRic}/{totAtt} stecche · {completati}/{items.length} prodotti</span>
       </div>
 
-      <div style={styles.layout}>
-        {/* Lista prodotti */}
-        <div style={styles.listCol}>
-          {items.map((item, i) => {
-            const isActive = i === activeIdx;
-            const isDone = item.ricevuto === item.stecche;
-            const isOver = item.ricevuto > item.stecche;
-            const hasEan = Object.values(catalogo).includes(item.codAams);
+      <div style={st.layout}>
+        {/* Lista */}
+        <div style={st.listCol}>
+          {items.map((item,i)=>{
+            const isActive=i===activeIdx, isDone=item.ricevuto===item.stecche, isOver=item.ricevuto>item.stecche;
+            const hasEan=Object.values(catalogo).includes(item.codAams);
             return (
-              <div key={i}
-                style={{ ...styles.listItem, ...(isActive?styles.listItemActive:{}), ...(isDone?styles.listItemDone:{}), ...(isOver?styles.listItemOver:{}) }}
-                onClick={() => { setActiveIdx(i); setTimeout(()=>scanRef.current?.focus(),50); }}
-              >
-                <div style={styles.liLeft}>
+              <div key={i} style={{ ...st.listItem, ...(isActive?st.listItemActive:{}), ...(isDone?{background:"#F0FAF3"}:{}), ...(isOver?{background:"#FFF0F0"}:{}) }}
+                onClick={()=>{ setActiveIdx(i); setTimeout(()=>scanRef.current?.focus(),50); }}>
+                <div style={{ display:"flex", flexDirection:"column", gap:3, flex:1, minWidth:0 }}>
                   <div style={{ display:"flex", gap:4, alignItems:"center" }}>
-                    <code style={styles.liCode}>{item.codAams}</code>
-                    {hasEan && <span title="Barcode abbinato" style={styles.liEanDot}>●</span>}
+                    <code style={st.smallCode}>{item.codAams}</code>
+                    {hasEan && <span style={{ fontSize:8, color:C.green }} title="Barcode abbinato">●</span>}
                   </div>
-                  <span style={styles.liName}>{item.descrizione}</span>
+                  <span style={{ fontSize:12, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{item.descrizione}</span>
+                  {item.prezzoConf && <span style={{ fontSize:10, color:C.muted }}>€ {item.prezzoConf.toFixed(2)}</span>}
                 </div>
-                <div style={styles.liRight}>
-                  <span style={styles.liQty}>{item.ricevuto}<span style={styles.liQtyOf}>/{item.stecche}</span></span>
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4, marginLeft:8 }}>
+                  <span style={{ fontSize:16, fontWeight:700 }}>{item.ricevuto}<span style={{ fontSize:12, color:C.muted, fontWeight:400 }}>/{item.stecche}</span></span>
                   <StatusBadge item={item} />
                 </div>
               </div>
@@ -451,254 +428,165 @@ export default function RicevimentoMerce() {
           })}
         </div>
 
-        {/* Pannello scansione */}
-        <div style={styles.scanCol}>
+        {/* Pannello */}
+        <div style={st.scanCol}>
           {activeItem ? (
             <>
-              <div style={styles.scanCard}>
-                <p style={styles.scanLabel}>Prodotto selezionato</p>
-                <p style={styles.scanName}>{activeItem.descrizione}</p>
-                <div style={styles.scanMeta}>
+              {/* Scheda prodotto */}
+              <div style={st.card}>
+                <p style={{ fontSize:10, color:"#AAA", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>Prodotto selezionato</p>
+                <p style={{ fontSize:17, fontWeight:700, marginBottom:10, lineHeight:1.3 }}>{activeItem.descrizione}</p>
+                <div style={{ display:"flex", flexDirection:"column", gap:4, fontSize:12, color:"#666", marginBottom:12 }}>
                   <span><b>Cod.AAMS:</b> {activeItem.codAams}</span>
                   <span><b>Attese:</b> {activeItem.stecche} stecche ({activeItem.pacchi} pacchetti)</span>
                   <span><b>Kgc fattura:</b> {activeItem.kgc.toFixed(3)}</span>
+                  {activeItem.prezzoConf && <span><b>Prezzo conf.:</b> € {activeItem.prezzoConf.toFixed(2)} · Aggio: € {(activeItem.prezzoConf*0.1).toFixed(2)}</span>}
                 </div>
-                {/* EAN abbinati a questo prodotto */}
-                {(() => {
+
+                {/* Barcode abbinati */}
+                {(()=>{
                   const eans = Object.entries(catalogo).filter(([,c])=>c===activeItem.codAams).map(([e])=>e);
-                  return eans.length > 0 ? (
-                    <div style={styles.eanList}>
-                      <span style={styles.eanListLabel}>Barcode salvati:</span>
-                      {eans.map(e => <code key={e} style={styles.eanPill}>{e}</code>)}
-                    </div>
-                  ) : (
-                    <div style={styles.eanEmpty}>Nessun barcode abbinato ancora — scansiona la prima stecca</div>
-                  );
+                  return eans.length>0
+                    ? <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:10, fontSize:11 }}>
+                        <span style={{ color:C.muted }}>Barcode:</span>
+                        {eans.map(e=><code key={e} style={{ background:"#EAF3DE", color:"#27500A", padding:"2px 8px", borderRadius:20, fontSize:11 }}>{e}</code>)}
+                      </div>
+                    : <div style={{ fontSize:11, color:"#AAA", fontStyle:"italic", marginBottom:10 }}>Nessun barcode abbinato — scansiona la prima stecca</div>;
                 })()}
-                <div style={styles.scanProgress}>
-                  <div style={{ ...styles.scanProgressFill, width:`${Math.min(100,activeItem.ricevuto/activeItem.stecche*100)}%`, background: activeItem.ricevuto>activeItem.stecche?"#c0392b":"#1a6b2e" }} />
+
+                {/* Progress bar prodotto */}
+                <div style={{ height:8, background:C.borderLight, borderRadius:4, overflow:"hidden", marginBottom:6 }}>
+                  <div style={{ height:"100%", borderRadius:4, transition:"width .3s, background .3s", width:`${Math.min(100,activeItem.ricevuto/activeItem.stecche*100)}%`, background: activeItem.ricevuto>activeItem.stecche?C.red:C.green }} />
                 </div>
-                <p style={styles.scanCount}>{activeItem.ricevuto} / {activeItem.stecche} stecche ricevute</p>
+                <p style={{ fontSize:13, fontWeight:600 }}>{activeItem.ricevuto} / {activeItem.stecche} stecche ricevute</p>
               </div>
 
-              {/* Barcode input */}
-              <div style={styles.barcodeWrap}>
-                <p style={styles.barcodeLabel}>🔫 Scansiona stecca</p>
-                <input
-                  ref={scanRef}
-                  style={styles.barcodeInput}
-                  value={scanInput}
-                  onChange={e => setScanInput(e.target.value)}
-                  onKeyDown={handleScan}
-                  placeholder="Scansiona o digita codice + Invio"
-                  autoComplete="off"
-                />
-                <p style={styles.barcodeHint}>
-                  {Object.values(catalogo).includes(activeItem.codAams)
-                    ? "✓ Prodotto riconosciuto automaticamente"
-                    : "Prima scansione → verrà chiesto di abbinare il prodotto"}
+              {/* Scansione barcode */}
+              <div style={st.card}>
+                <p style={{ fontSize:12, fontWeight:600, marginBottom:8 }}>🔫 Scansiona stecca</p>
+                <input ref={scanRef} style={st.scanInput} value={scanInput}
+                  onChange={e=>setScanInput(e.target.value)} onKeyDown={handleScan}
+                  placeholder="Scansiona o digita codice + Invio" autoComplete="off" />
+                <p style={{ fontSize:11, color:C.muted, marginTop:6 }}>
+                  {Object.values(catalogo).includes(activeItem.codAams) ? "✓ Prodotto già riconosciuto automaticamente" : "Prima scansione → abbinamento guidato"}
                 </p>
               </div>
 
-              {/* Inserimento manuale */}
-              <div style={styles.manualWrap}>
-                <p style={styles.manualLabel}>Inserimento manuale</p>
-                <div style={styles.manualRow}>
-                  <button style={styles.qtyBtn} onClick={()=>setManualQty(q=>Math.max(1,q-1))}>−</button>
-                  <span style={styles.qtyVal}>{manualQty}</span>
-                  <button style={styles.qtyBtn} onClick={()=>setManualQty(q=>q+1)}>+</button>
-                  <span style={styles.qtyUnit}>stecche</span>
-                  <button style={styles.addBtn} onClick={()=>{ registraRicezione(activeIdx,manualQty); setManualQty(1); }}>
+              {/* Inserimento manuale con − e + e campo numerico */}
+              <div style={st.card}>
+                <p style={{ fontSize:12, fontWeight:600, marginBottom:10 }}>Inserimento manuale</p>
+                <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                  <button style={st.qtyBtn} onClick={()=>rimuovi(activeIdx, 1)}>−</button>
+                  <input
+                    type="number"
+                    style={{ width:70, padding:"7px 10px", fontSize:16, fontWeight:700, border:`2px solid ${C.border}`, borderRadius:7, fontFamily:C.font, textAlign:"center", outline:"none" }}
+                    value={manualQty}
+                    onChange={e=>setManualQty(e.target.value)}
+                    placeholder="0"
+                    onKeyDown={e=>e.key==="Enter"&&aggiungiManuale()}
+                  />
+                  <button style={st.qtyBtn} onClick={()=>setManualQty(q=>(parseInt(q)||0)+1)}>+</button>
+                  <span style={{ fontSize:12, color:C.muted }}>stecche</span>
+                  <button style={{ ...st.btnPrimary, marginLeft:"auto", padding:"8px 18px" }} onClick={aggiungiManuale}>
                     Aggiungi
                   </button>
                 </div>
+                <p style={{ fontSize:11, color:C.muted, marginTop:8 }}>Scrivi un numero negativo (es. -2) per rimuovere stecche in eccesso · Premi Invio</p>
               </div>
 
               {/* Storico scansioni */}
-              {activeItem.scansioni.length > 0 && (
-                <div style={styles.historyWrap}>
-                  <div style={styles.historyHeader}>
-                    <p style={styles.historyTitle}>Scansioni ({activeItem.scansioni.length})</p>
-                    <button style={styles.resetBtn} onClick={()=>resetItem(activeIdx)}>Reset</button>
+              {activeItem.scansioni.length>0 && (
+                <div style={st.card}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                    <p style={{ fontSize:12, fontWeight:600 }}>Scansioni ({activeItem.scansioni.length})</p>
+                    <button style={{ fontSize:11, color:C.red, background:"none", border:"none", cursor:"pointer", fontFamily:C.font }}
+                      onClick={()=>setItems(prev=>prev.map((item,i)=>i===activeIdx?{...item,ricevuto:0,scansioni:[]}:item))}>
+                      Reset
+                    </button>
                   </div>
-                  {activeItem.scansioni.map((s,j) => (
-                    <div key={j} style={styles.historyRow}>
-                      <span style={styles.historyTs}>{s.ts}</span>
-                      <span>+{s.qty} stecche</span>
-                      <code style={styles.historyCode}>{s.barcode}</code>
+                  {activeItem.scansioni.map((s,j)=>(
+                    <div key={j} style={{ display:"flex", gap:12, fontSize:12, color:"#666", padding:"4px 0", borderBottom:`1px solid ${C.borderLight}` }}>
+                      <span style={{ color:"#AAA" }}>{s.ts}</span>
+                      <span style={{ color:s.qty<0?C.red:C.green, fontWeight:500 }}>{s.qty>0?"+":""}{s.qty} stecche</span>
+                      <code style={{ color:"#AAA", fontSize:11 }}>{s.barcode}</code>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* Naviga */}
-              <div style={styles.navBtns}>
-                <button style={styles.navBtn} disabled={activeIdx===0}
-                  onClick={()=>{ setActiveIdx(i=>i-1); setTimeout(()=>scanRef.current?.focus(),50); }}>
-                  ← Precedente
-                </button>
-                <button style={styles.navBtn} disabled={activeIdx===items.length-1}
-                  onClick={()=>{ setActiveIdx(i=>i+1); setTimeout(()=>scanRef.current?.focus(),50); }}>
-                  Successivo →
-                </button>
+              {/* Navigazione */}
+              <div style={{ display:"flex", gap:8 }}>
+                <button style={{ ...st.btnSecondary, flex:1 }} disabled={activeIdx===0}
+                  onClick={()=>{ setActiveIdx(i=>i-1); setTimeout(()=>scanRef.current?.focus(),50); }}>← Precedente</button>
+                <button style={{ ...st.btnSecondary, flex:1 }} disabled={activeIdx===items.length-1}
+                  onClick={()=>{ setActiveIdx(i=>i+1); setTimeout(()=>scanRef.current?.focus(),50); }}>Successivo →</button>
               </div>
             </>
           ) : (
-            <p style={{color:"#888",fontSize:14}}>Seleziona un prodotto dalla lista</p>
+            <p style={{ color:C.muted, fontSize:14 }}>Seleziona un prodotto dalla lista</p>
           )}
         </div>
       </div>
 
-      {toast && <div style={{ ...styles.toast, ...(toast.type==="warn"?styles.toastWarn:toast.type==="info"?styles.toastInfo:{}) }}>{toast.msg}</div>}
+      {toast && <Toast toast={toast} />}
+    </div>
+  );
+}
+
+function Toast({ toast }) {
+  return (
+    <div style={{ position:"fixed", top:70, right:20, background: toast.type==="warn"?"#8B3A0F":toast.type==="info"?"#0C447C":"#1a6b2e", color:"#fff", padding:"10px 18px", borderRadius:8, fontSize:13, fontWeight:500, boxShadow:"0 4px 16px rgba(0,0,0,0.15)", zIndex:999 }}>
+      {toast.msg}
     </div>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
-const S = {
-  font: "'IBM Plex Mono', 'Courier New', monospace",
-  bg: "#F7F5F0", white: "#fff", border: "#E8E4DC", borderLight: "#F0EDE6",
-  text: "#1a1a1a", muted: "#888", red: "#C41E1E", green: "#1a6b2e", blue: "#0C447C",
+const C = {
+  font:"'IBM Plex Mono', monospace", bg:"#F7F5F0", white:"#fff",
+  border:"#E8E4DC", borderLight:"#F0EDE6", text:"#1a1a1a",
+  muted:"#888", red:"#C41E1E", green:"#1a6b2e", blue:"#0C447C",
 };
-const styles = {
-  root: { fontFamily:S.font, background:S.bg, minHeight:"100vh", padding:"0 0 40px" },
-  // Upload
-  uploadWrap: { maxWidth:480, margin:"0 auto", padding:"60px 24px 40px" },
-  logo: { display:"flex", alignItems:"center", gap:8, marginBottom:8 },
-  logoL: { background:S.red, color:"#fff", fontWeight:700, fontSize:22, width:36, height:36, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:4 },
-  logoText: { fontSize:16, fontWeight:600, color:S.text, letterSpacing:"-0.02em" },
-  uploadSub: { fontSize:13, color:S.muted, marginBottom:28 },
-  dropzone: { border:"2px dashed #C8C4BA", borderRadius:10, padding:"36px 24px", textAlign:"center", cursor:"pointer", background:S.white, transition:"all .15s" },
-  dropzoneActive: { borderColor:S.red, background:"#FFF5F5" },
-  dropIcon: { fontSize:36, marginBottom:10 },
-  dropMain: { fontSize:15, fontWeight:600, color:S.text, marginBottom:4 },
-  dropSub: { fontSize:12, color:S.muted },
-  divider: { textAlign:"center", color:"#CCC", fontSize:12, margin:"20px 0", borderTop:"1px solid #E8E4DC", marginTop:24, paddingTop:0, position:"relative", top:-10 },
-  demoBtn: { width:"100%", padding:"12px", background:S.text, color:"#fff", border:"none", borderRadius:8, fontSize:13, cursor:"pointer", fontFamily:"inherit" },
-  catalogoBanner: { display:"flex", justifyContent:"space-between", alignItems:"center", background:"#EAF3DE", border:"1px solid #97C459", borderRadius:8, padding:"10px 14px", marginTop:14, fontSize:12, color:"#27500A" },
-  catalogoClear: { background:"none", border:"none", color:"#8B3A0F", fontSize:11, cursor:"pointer", fontFamily:"inherit" },
-  hint: { fontSize:11, color:"#AAA", textAlign:"center", marginTop:20, lineHeight:1.6 },
-  // Header
-  header: { background:S.text, color:"#fff", padding:"12px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" },
-  headerTitle: { fontSize:14, fontWeight:600 },
-  headerSub: { fontSize:12, color:"#AAA" },
-  headerCatalogo: { fontSize:11, color:"#AAA", background:"rgba(255,255,255,0.1)", padding:"3px 10px", borderRadius:20 },
-  summaryBtn: { background:"transparent", border:"1px solid #555", color:"#ddd", padding:"5px 14px", borderRadius:6, fontSize:12, cursor:"pointer", fontFamily:"inherit" },
-  // Progress
-  progressWrap: { background:S.white, borderBottom:`1px solid ${S.border}`, padding:"10px 20px", display:"flex", alignItems:"center", gap:14 },
-  progressTrack: { flex:1, height:6, background:S.border, borderRadius:4, overflow:"hidden" },
-  progressFill: { height:"100%", background:S.green, borderRadius:4, transition:"width .3s" },
-  progressLabel: { fontSize:12, color:S.muted, whiteSpace:"nowrap" },
-  // Layout
-  layout: { display:"flex", maxHeight:"calc(100vh - 120px)", overflow:"hidden" },
-  listCol: { width:340, borderRight:`1px solid ${S.border}`, overflowY:"auto", background:S.white, flexShrink:0 },
-  scanCol: { flex:1, overflowY:"auto", padding:"16px 20px" },
-  // List
-  listItem: { padding:"10px 14px", borderBottom:`1px solid ${S.borderLight}`, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" },
-  listItemActive: { background:"#FFF8F0", borderLeft:`3px solid ${S.red}` },
-  listItemDone: { background:"#F0FAF3" },
-  listItemOver: { background:"#FFF0F0" },
-  liLeft: { display:"flex", flexDirection:"column", gap:3, flex:1, minWidth:0 },
-  liCode: { fontSize:10, color:S.muted, background:S.borderLight, padding:"1px 5px", borderRadius:3, display:"inline-block" },
-  liEanDot: { fontSize:8, color:S.green, title:"Barcode abbinato" },
-  liName: { fontSize:12, fontWeight:500, color:S.text, lineHeight:1.3, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" },
-  liRight: { display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4, marginLeft:8 },
-  liQty: { fontSize:16, fontWeight:700, color:S.text },
-  liQtyOf: { fontSize:12, color:"#AAA", fontWeight:400 },
-  // Scan panel
-  scanCard: { background:S.white, border:`1px solid ${S.border}`, borderRadius:10, padding:"16px", marginBottom:14 },
-  scanLabel: { fontSize:10, color:"#AAA", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 },
-  scanName: { fontSize:17, fontWeight:700, color:S.text, marginBottom:10, lineHeight:1.3 },
-  scanMeta: { display:"flex", flexDirection:"column", gap:4, fontSize:12, color:"#666", marginBottom:12 },
-  eanList: { display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginBottom:10, fontSize:11 },
-  eanListLabel: { color:S.muted },
-  eanPill: { background:"#EAF3DE", color:"#27500A", padding:"2px 8px", borderRadius:20, fontSize:11 },
-  eanEmpty: { fontSize:11, color:"#AAA", fontStyle:"italic", marginBottom:10, padding:"6px 0", borderTop:`1px dashed ${S.border}` },
-  scanProgress: { height:8, background:S.borderLight, borderRadius:4, overflow:"hidden", marginBottom:6 },
-  scanProgressFill: { height:"100%", borderRadius:4, transition:"width .3s, background .3s" },
-  scanCount: { fontSize:13, fontWeight:600, color:S.text },
-  // Barcode
-  barcodeWrap: { background:S.white, border:`1px solid ${S.border}`, borderRadius:10, padding:"14px 16px", marginBottom:12 },
-  barcodeLabel: { fontSize:12, fontWeight:600, color:S.text, marginBottom:8 },
-  barcodeInput: { width:"100%", padding:"10px 12px", fontSize:14, border:`2px solid ${S.text}`, borderRadius:6, background:"#FAFAF8", fontFamily:"inherit", outline:"none", boxSizing:"border-box" },
-  barcodeHint: { fontSize:11, color:S.muted, marginTop:6 },
-  // Manual
-  manualWrap: { background:S.white, border:`1px solid ${S.border}`, borderRadius:10, padding:"14px 16px", marginBottom:12 },
-  manualLabel: { fontSize:12, fontWeight:600, color:S.text, marginBottom:10 },
-  manualRow: { display:"flex", alignItems:"center", gap:10 },
-  qtyBtn: { width:32, height:32, background:S.borderLight, border:"none", borderRadius:6, fontSize:18, cursor:"pointer", fontFamily:"inherit" },
-  qtyVal: { fontSize:20, fontWeight:700, minWidth:28, textAlign:"center" },
-  qtyUnit: { fontSize:12, color:S.muted },
-  addBtn: { marginLeft:"auto", padding:"8px 20px", background:S.text, color:"#fff", border:"none", borderRadius:6, fontSize:13, cursor:"pointer", fontFamily:"inherit" },
-  // History
-  historyWrap: { background:S.white, border:`1px solid ${S.border}`, borderRadius:10, padding:"14px 16px", marginBottom:12 },
-  historyHeader: { display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 },
-  historyTitle: { fontSize:12, fontWeight:600, color:S.text },
-  resetBtn: { fontSize:11, color:S.red, background:"none", border:"none", cursor:"pointer", fontFamily:"inherit" },
-  historyRow: { display:"flex", gap:12, fontSize:12, color:"#666", padding:"4px 0", borderBottom:`1px solid ${S.borderLight}` },
-  historyTs: { color:"#AAA" },
-  historyCode: { color:"#AAA", fontSize:11 },
-  // Nav
-  navBtns: { display:"flex", gap:8 },
-  navBtn: { flex:1, padding:"9px", background:S.borderLight, border:"none", borderRadius:7, fontSize:13, cursor:"pointer", fontFamily:"inherit", color:S.text },
-  // Toast
-  toast: { position:"fixed", top:70, right:20, background:S.green, color:"#fff", padding:"10px 18px", borderRadius:8, fontSize:13, fontWeight:500, boxShadow:"0 4px 16px rgba(0,0,0,0.15)", zIndex:999 },
-  toastWarn: { background:"#8B3A0F" },
-  toastInfo: { background:S.blue },
-  // Badges
-  badge: {
-    ok:      { background:"#D4EDDA", color:S.green,   padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:600 },
-    pending: { background:S.borderLight, color:S.muted, padding:"2px 8px", borderRadius:20, fontSize:11 },
-    partial: { background:"#FFF3CD", color:"#7B4F00", padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:600 },
-    over:    { background:"#FDECEA", color:S.red,     padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:600 },
+const st = {
+  root:{ fontFamily:C.font, background:C.bg, minHeight:"100vh", paddingBottom:40 },
+  uploadWrap:{ maxWidth:480, margin:"0 auto", padding:"60px 24px 40px" },
+  logo:{ display:"flex", alignItems:"center", gap:8, marginBottom:8 },
+  logoL:{ background:C.red, color:"#fff", fontWeight:700, fontSize:22, width:36, height:36, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:4 },
+  dropzone:{ border:"2px dashed #C8C4BA", borderRadius:10, padding:"36px 24px", textAlign:"center", cursor:"pointer", background:C.white, transition:"all .15s" },
+  dropzoneActive:{ borderColor:C.red, background:"#FFF5F5" },
+  catalogoBanner:{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#EAF3DE", border:"1px solid #97C459", borderRadius:8, padding:"10px 14px", marginTop:14, fontSize:12, color:"#27500A" },
+  header:{ background:C.text, color:"#fff", padding:"12px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" },
+  headerBtn:{ background:"transparent", border:"1px solid #555", color:"#ddd", padding:"5px 14px", borderRadius:6, fontSize:12, cursor:"pointer", fontFamily:C.font },
+  progressWrap:{ background:C.white, borderBottom:`1px solid ${C.border}`, padding:"10px 20px", display:"flex", alignItems:"center", gap:14 },
+  progressTrack:{ flex:1, height:6, background:C.border, borderRadius:4, overflow:"hidden" },
+  progressFill:{ height:"100%", background:C.green, borderRadius:4, transition:"width .3s" },
+  layout:{ display:"flex", maxHeight:"calc(100vh - 120px)", overflow:"hidden" },
+  listCol:{ width:320, borderRight:`1px solid ${C.border}`, overflowY:"auto", background:C.white, flexShrink:0 },
+  scanCol:{ flex:1, overflowY:"auto", padding:"16px 20px", display:"flex", flexDirection:"column", gap:12 },
+  listItem:{ padding:"10px 14px", borderBottom:`1px solid ${C.borderLight}`, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" },
+  listItemActive:{ background:"#FFF8F0", borderLeft:`3px solid ${C.red}` },
+  card:{ background:C.white, border:`1px solid ${C.border}`, borderRadius:10, padding:"14px 16px" },
+  scanInput:{ width:"100%", padding:"10px 12px", fontSize:14, border:`2px solid ${C.text}`, borderRadius:6, background:"#FAFAF8", fontFamily:C.font, outline:"none", boxSizing:"border-box" },
+  qtyBtn:{ width:36, height:36, background:C.borderLight, border:"none", borderRadius:6, fontSize:20, cursor:"pointer", fontFamily:C.font, display:"flex", alignItems:"center", justifyContent:"center" },
+  summaryWrap:{ maxWidth:760, margin:"0 auto", padding:"32px 20px" },
+  summaryGrid:{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:20 },
+  summaryCard:{ background:C.white, border:`1px solid ${C.border}`, borderRadius:8, padding:"12px 14px" },
+  table:{ width:"100%", borderCollapse:"collapse", background:C.white, borderRadius:8, overflow:"hidden", border:`1px solid ${C.border}`, marginBottom:16 },
+  th:{ padding:"9px 12px", fontSize:11, color:C.muted, textTransform:"uppercase", letterSpacing:"0.05em", borderBottom:`1px solid ${C.border}`, textAlign:"left", background:"#FAFAF8" },
+  td:{ padding:"10px 12px", fontSize:13, borderBottom:`1px solid ${C.borderLight}` },
+  smallCode:{ background:C.borderLight, padding:"2px 6px", borderRadius:3, fontSize:11 },
+  eanBadge:{ background:"#FFF3CD", color:"#7B4F00", padding:"4px 12px", borderRadius:20, fontSize:13, fontWeight:600 },
+  modalSearch:{ width:"100%", padding:"9px 12px", fontSize:13, border:`1.5px solid ${C.border}`, borderRadius:7, fontFamily:C.font, outline:"none", marginBottom:10, boxSizing:"border-box", background:"#FAFAF8" },
+  modalItem:{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", border:`1px solid ${C.border}`, borderRadius:8, cursor:"pointer" },
+  modalItemSel:{ background:"#EAF3DE", borderColor:"#97C459" },
+  overlay:{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:16 },
+  modal:{ background:C.white, borderRadius:12, padding:24, width:"100%", maxWidth:520, maxHeight:"85vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" },
+  btnPrimary:{ padding:"9px 20px", background:C.text, color:"#fff", border:"none", borderRadius:7, fontSize:13, cursor:"pointer", fontFamily:C.font, fontWeight:600 },
+  btnSecondary:{ padding:"9px 16px", background:"none", border:`1px solid ${C.border}`, borderRadius:7, fontSize:13, cursor:"pointer", fontFamily:C.font, color:C.muted },
+  badge:{
+    ok:{ background:"#D4EDDA", color:C.green, padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:600 },
+    pending:{ background:C.borderLight, color:C.muted, padding:"2px 8px", borderRadius:20, fontSize:11 },
+    partial:{ background:"#FFF3CD", color:"#7B4F00", padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:600 },
+    over:{ background:"#FDECEA", color:C.red, padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:600 },
   },
-  // Modal abbinamento
-  modalOverlay: { position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:16 },
-  modal: { background:S.white, borderRadius:12, padding:"24px", width:"100%", maxWidth:520, maxHeight:"85vh", overflowY:"auto", boxShadow:"0 20px 60px rgba(0,0,0,0.3)" },
-  modalHeader: { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:20 },
-  modalTitle: { fontSize:16, fontWeight:700, color:S.text, marginBottom:4 },
-  modalSub: { fontSize:12, color:S.muted },
-  eanBadge: { background:"#FFF3CD", color:"#7B4F00", padding:"4px 12px", borderRadius:20, fontSize:13, fontWeight:600, fontFamily:S.font, whiteSpace:"nowrap" },
-  modalLabel: { fontSize:13, fontWeight:600, color:S.text, marginBottom:10 },
-  modalSearch: { width:"100%", padding:"9px 12px", fontSize:13, border:`1.5px solid ${S.border}`, borderRadius:7, background:"#FAFAF8", fontFamily:"inherit", outline:"none", marginBottom:10, boxSizing:"border-box" },
-  modalList: { display:"flex", flexDirection:"column", gap:4, marginBottom:16, maxHeight:280, overflowY:"auto" },
-  modalItem: { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", border:`1px solid ${S.border}`, borderRadius:8, cursor:"pointer", transition:"all .1s" },
-  modalItemSel: { background:"#EAF3DE", borderColor:"#97C459" },
-  modalItemLeft: { display:"flex", flexDirection:"column", gap:4 },
-  modalCode: { fontSize:10, background:S.borderLight, padding:"1px 6px", borderRadius:3, color:S.muted },
-  modalItemName: { fontSize:13, fontWeight:500, color:S.text },
-  modalItemRight: { display:"flex", alignItems:"center", gap:8 },
-  modalItemQty: { fontSize:12, color:S.muted },
-  checkmark: { color:S.green, fontWeight:700, fontSize:16 },
-  modalFooter: { display:"flex", gap:10, justifyContent:"flex-end" },
-  modalSkip: { padding:"9px 18px", background:"none", border:`1px solid ${S.border}`, borderRadius:7, fontSize:13, cursor:"pointer", fontFamily:"inherit", color:S.muted },
-  modalConfirm: { padding:"9px 20px", background:S.text, color:"#fff", border:"none", borderRadius:7, fontSize:13, cursor:"pointer", fontFamily:"inherit", fontWeight:600 },
-  modalConfirmDisabled: { background:"#CCC", cursor:"not-allowed" },
-  modalHint: { fontSize:11, color:S.muted, textAlign:"center", marginTop:14, lineHeight:1.5 },
-  // Summary
-  summaryWrap: { maxWidth:700, margin:"0 auto", padding:"32px 20px" },
-  summaryHeader: { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:20 },
-  summaryTitle: { fontSize:20, fontWeight:700, color:S.text },
-  summarySub: { fontSize:13, color:S.muted, marginTop:3 },
-  backBtn: { fontSize:12, background:"none", border:`1px solid #C8C4BA`, padding:"6px 14px", borderRadius:6, cursor:"pointer", fontFamily:"inherit" },
-  summaryGrid: { display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:10, marginBottom:20 },
-  summaryCard: { background:S.white, border:`1px solid ${S.border}`, borderRadius:8, padding:"12px 14px" },
-  scLabel: { fontSize:11, color:S.muted, marginBottom:4 },
-  scVal: { fontSize:22, fontWeight:700, color:S.text },
-  table: { width:"100%", borderCollapse:"collapse", background:S.white, borderRadius:8, overflow:"hidden", border:`1px solid ${S.border}`, marginBottom:16 },
-  th: { padding:"9px 12px", fontSize:11, color:S.muted, textTransform:"uppercase", letterSpacing:"0.05em", borderBottom:`1px solid ${S.border}`, textAlign:"left", background:"#FAFAF8" },
-  td: { padding:"10px 12px", fontSize:13, borderBottom:`1px solid ${S.borderLight}` },
-  trWarn: { background:"#FFFBF0" },
-  code: { background:S.borderLight, padding:"2px 6px", borderRadius:3, fontSize:11 },
-  eanTag: { fontSize:12, marginLeft:4, title:"Barcode abbinato" },
-  catalogoSummary: { background:S.white, border:`1px solid ${S.border}`, borderRadius:8, padding:"14px 16px", marginBottom:16 },
-  catalogoSummaryTitle: { fontSize:13, fontWeight:600, color:S.text, marginBottom:10 },
-  catalogoGrid: { display:"flex", flexDirection:"column", gap:6 },
-  catalogoRow: { display:"flex", alignItems:"center", gap:10, fontSize:12 },
-  catalogoEan: { background:"#FFF3CD", color:"#7B4F00", padding:"2px 8px", borderRadius:20, fontSize:11 },
-  catalogoArrow: { color:S.muted },
-  catalogoProd: { color:S.text },
-  summaryActions: { display:"flex", gap:10 },
-  primaryBtn: { padding:"10px 24px", background:S.text, color:"#fff", border:"none", borderRadius:8, fontSize:13, cursor:"pointer", fontFamily:"inherit" },
-  secondaryBtn: { padding:"10px 24px", background:S.white, color:S.text, border:`1px solid #C8C4BA`, borderRadius:8, fontSize:13, cursor:"pointer", fontFamily:"inherit" },
 };

@@ -1,0 +1,11 @@
+{
+  "short_name": "Tabaccheria",
+  "name": "Tabaccheria Bibione — Gestionale",
+  "icons": [
+    { "src": "favicon.ico", "sizes": "64x64 32x32 24x24 16x16", "type": "image/x-icon" }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1a1a1a",
+  "background_color": "#F7F5F0"
+}
