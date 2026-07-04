@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { supabase, getUtenteCorrente, logout } from './supabaseClient';
+import Login from './Login';
 import RicevimentoMerce from './RicevimentoMerce';
 import CatalogoBarcode from './CatalogoBarcode';
 import StoricoOrdini from './StoricoOrdini';
@@ -8,15 +10,57 @@ const FONT = "'IBM Plex Mono', monospace";
 
 export default function App() {
   const [page, setPage] = useState('ricevimento');
+  const [utente, setUtente] = useState(null);
+  const [caricamento, setCaricamento] = useState(true);
+
+  useEffect(() => {
+    // Controlla sessione esistente
+    verificaUtente();
+    // Ascolta cambi di auth
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) verificaUtente();
+      else setUtente(null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  async function verificaUtente() {
+    try {
+      const u = await getUtenteCorrente();
+      setUtente(u);
+    } catch {
+      setUtente(null);
+    } finally {
+      setCaricamento(false);
+    }
+  }
+
+  async function handleLogout() {
+    await logout();
+    setUtente(null);
+    setPage('ricevimento');
+  }
+
+  // Schermata caricamento
+  if (caricamento) return (
+    <div style={{ fontFamily: FONT, minHeight: '100vh', background: '#F7F5F0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <p style={{ fontSize: 14, color: '#888' }}>Caricamento...</p>
+    </div>
+  );
+
+  // Non autenticato → login
+  if (!utente) return <Login onLogin={verificaUtente} />;
+
+  const isTitolare = utente.profilo?.ruolo === 'titolare';
 
   const nav = [
     { id: 'ricevimento', label: '📦 Ricevimento' },
     { id: 'storico',     label: '🗂 Storico ordini' },
     { id: 'catalogo',    label: '🔖 Catalogo barcode' },
     { id: 'magazzino',   label: '🗄 Magazzino',   soon: true },
-    { id: 'ordini',      label: '📋 Ordini auto',  soon: true },
-    { id: 'statistiche', label: '📊 Statistiche',  soon: true },
-  ];
+    { id: 'ordini',      label: '📋 Ordini auto',  soon: true, soloTitolare: true },
+    { id: 'statistiche', label: '📊 Statistiche',  soon: true, soloTitolare: true },
+  ].filter(n => !n.soloTitolare || isTitolare);
 
   return (
     <div style={{ fontFamily: FONT, minHeight: '100vh', background: '#F7F5F0' }}>
@@ -41,11 +85,24 @@ export default function App() {
             {n.soon && <span style={{ fontSize: 9, background: '#333', color: '#666', padding: '1px 5px', borderRadius: 20 }}>presto</span>}
           </button>
         ))}
+
+        {/* Utente + logout */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, paddingLeft: 16 }}>
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ color: '#fff', fontSize: 12, fontWeight: 500 }}>{utente.profilo?.nome || utente.email}</p>
+            <p style={{ color: '#666', fontSize: 10 }}>{isTitolare ? '👑 Titolare' : 'Dipendente'}</p>
+          </div>
+          <button
+            onClick={handleLogout}
+            style={{ background: 'none', border: '1px solid #444', color: '#888', padding: '5px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', fontFamily: FONT }}>
+            Esci
+          </button>
+        </div>
       </div>
 
-      {page === 'ricevimento' && <RicevimentoMerce />}
-      {page === 'storico'     && <StoricoOrdini />}
-      {page === 'catalogo'    && <CatalogoBarcode />}
+      {page === 'ricevimento' && <RicevimentoMerce utente={utente} />}
+      {page === 'storico'     && <StoricoOrdini utente={utente} isTitolare={isTitolare} />}
+      {page === 'catalogo'    && <CatalogoBarcode utente={utente} />}
     </div>
   );
 }
