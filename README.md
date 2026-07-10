@@ -1,68 +1,44 @@
-# Tabaccheria Bibione — Gestionale Web v2.0
-### Con login utenti e database Supabase
+# Tabaccheria Bibione — Gestionale v3.0
 
----
+## Novità v3
+- Catalogo ADM completo: 4.208 prodotti (tutte le 7 categorie)
+- Barcode con unità (stecca/pacchetto) e peso in kg per trinciati
+- Alert discrepanze alla chiusura sessione + testo reclamo pronto per Logista
+- Foto della bolla di consegna e foto per le discrepanze
+- Ricerca rapida prodotti durante la scansione
+- Storico prezzi ADM (traccia gli aumenti)
+- Struttura multi-fornitore
+- Backup con un clic (JSON + CSV)
+- Log modifiche barcode (chi, cosa, quando)
 
-## PASSO 1 — Configura il database Supabase (5 minuti, una volta sola)
+## AGGIORNAMENTO — 2 passi
 
-1. Vai su **supabase.com** → apri il tuo progetto `tabaccheria`
-2. Nel menu a sinistra clicca **SQL Editor**
-3. Clicca **New query**
-4. Apri il file `supabase_schema.sql` (in questa cartella), copia TUTTO il contenuto
-5. Incollalo nell'editor SQL e clicca **Run** (o Ctrl+Invio)
-6. Deve apparire "Success. No rows returned"
+### Passo 1 — Database (una volta sola)
+1. supabase.com → progetto → **SQL Editor** → New query
+2. Apri `aggiornamento_v3.sql` con TextEdit/Blocco note
+3. Copia TUTTO (Cmd+A / Ctrl+A) → incolla nell'editor → **Run**
+4. Attendi ~10 secondi → "Success"
 
-## PASSO 2 — Crea gli utenti
+⚠️ Il file è grande (330 KB) — se l'editor si blocca, incolla e lancia
+   una sezione per volta (ogni blocco separato da commenti).
 
-1. Nel menu Supabase clicca **Authentication** → **Users**
-2. Clicca **Add user** → **Create new user**
-3. Crea il TUO account (titolare):
-   - Email: la tua email
-   - Password: scegli una password sicura
-   - ✅ Auto Confirm User
-4. Dopo averlo creato, vai su **Table Editor** → tabella `profili`
-5. Trova la riga del tuo utente → clicca per modificare → campo `ruolo` → scrivi `titolare` → salva
-6. Ripeti il passo 3 per ogni dipendente (il loro ruolo resta `dipendente`)
+I barcode già salvati NON vengono toccati.
 
-## PASSO 3 — Aggiorna i file su GitHub
+### Passo 2 — GitHub
+1. Repository `tabaccheria-app` → Add file → Upload files
+2. Carica: `package.json` + cartella `src/` completa
+3. Commit → Vercel aggiorna da solo in 2-3 minuti
 
-1. Vai sul tuo repository `tabaccheria-app` su GitHub
-2. Add file → Upload files
-3. Carica TUTTI i file di questa cartella (sostituiscono i vecchi):
-   - `package.json`
-   - tutta la cartella `src/`
-4. Commit changes
-5. Vercel ridistribuisce automaticamente in 2-3 minuti
-
-## PASSO 4 — Accedi
-
-Apri l'URL Vercel → appare la schermata di login → entra con email e password.
-
----
-
-## Cosa cambia con la v2.0
-
-| Funzione | Prima | Ora |
-|---|---|---|
-| Accesso | Chiunque con il link | Solo utenti registrati |
-| Barcode | Salvati nel browser | Database cloud, condivisi tra tutti |
-| Storico ordini | Solo sul tuo browser | Visibile a tutti gli utenti |
-| Sessione attiva | Per browser | Condivisa (una sola per il negozio) |
-| Eliminare ordini | Chiunque | Solo il titolare |
-| Ruoli | Nessuno | Titolare / Dipendente |
-
-## File del progetto
-
+## File
 ```
 src/
-├── App.js               # Navigazione + gestione auth
-├── Login.jsx            # Schermata di accesso
-├── supabaseClient.js    # Connessione database
-├── RicevimentoMerce.jsx # Modulo ricevimento (con PDF.js)
-├── StoricoOrdini.jsx    # Storico ordini
-├── CatalogoBarcode.jsx  # Gestione barcode
-├── logistaParsers.js    # Motore lettura PDF Logista
-├── catalogoADM.js       # Catalogo prodotti ADM
+├── App.js                # Navigazione + auth
+├── Login.jsx             # Accesso
+├── supabaseClient.js     # Database + foto + backup + log
+├── RicevimentoMerce.jsx  # Ricevimento con ricerca, foto, alert
+├── StoricoOrdini.jsx     # Storico con foto e note
+├── CatalogoBarcode.jsx   # Barcode raggruppati + unità + log
+├── logistaParsers.js     # Motore lettura PDF
 └── index.js
-supabase_schema.sql      # Schema database (da eseguire in Supabase)
+aggiornamento_v3.sql      # Migrazione database (catalogo ADM incluso)
 ```
