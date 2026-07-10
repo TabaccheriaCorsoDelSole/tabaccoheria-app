@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { caricaOrdini, eliminaOrdine } from "./supabaseClient";
+import { caricaOrdini, eliminaOrdine, urlFoto } from "./supabaseClient";
 
 const C = {
   font:"'IBM Plex Mono', monospace", bg:"#F7F5F0", white:"#fff",
@@ -127,6 +127,24 @@ export default function StoricoOrdini({ utente, isTitolare }) {
                       })}
                     </tbody>
                   </table>
+                  {ordine.noteDiscrepanze && (
+                    <div style={{ background:'#FFFBF0', border:'1px solid #EF9F27', borderRadius:8, padding:'10px 12px', marginBottom:12, fontSize:12, color:'#7B4F00' }}>
+                      <b>Note discrepanze:</b> {ordine.noteDiscrepanze}
+                    </div>
+                  )}
+                  {ordine.foto && ordine.foto.length > 0 && (
+                    <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:12 }}>
+                      {ordine.foto.map((f, fi) => (
+                        <button key={fi} style={{ ...bt.sec, fontSize:11 }}
+                          onClick={async () => {
+                            try { const u = await urlFoto(f.nome); window.open(u, '_blank'); }
+                            catch { alert('Foto non disponibile'); }
+                          }}>
+                          📷 {f.tipo === 'bolla' ? 'Bolla' : 'Discrepanza'} {fi + 1}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                     <button style={bt.pri} onClick={()=>esporta(ordine)}>⬇ Esporta</button>
                     {confirmDel===ordine.id

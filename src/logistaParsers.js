@@ -6,7 +6,8 @@
 //   - Estrazione intestazione (numero ordine, data, rivendita, titolare)
 //   - Normalizzazione descrizioni con catalogo ADM
 
-import { PRODOTTO_BY_AAMS } from './catalogoADM';
+// Il catalogo ADM viene caricato da Supabase a runtime — qui usiamo solo i dati grezzi della fattura
+const PRODOTTO_BY_AAMS = {};
 
 const KGC_PER_STECCA = 0.200;
 const PACKS_PER_STECCA = 10;
